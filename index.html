@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Key Cleaner</title>
+    <!-- Tailwind CSS for modern design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col justify-between">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200 py-4 px-6 mb-6">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+                <h1 class="text-xl font-bold text-blue-600">🧹 JSON Key Cleaner</h1>
+                <p class="text-xs text-gray-500 mt-0.5">A lightweight in-browser utility to recursively include (keep) or exclude (delete) specific keys and nested paths in JSON objects or arrays.</p>
+            </div>
+            <div class="flex gap-2 flex-shrink-0">
+                <button onclick="clearStorage()" class="text-sm bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg transition font-medium">
+                    Clear Storage
+                </button>
+                <button onclick="loadExample()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg transition font-medium">
+                    Load GeoJSON Example
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-6 w-full flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        
+        <!-- Column 1: Input JSON -->
+        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+            <div class="flex justify-between items-center mb-2">
+                <label for="jsonInput" class="block font-semibold text-sm text-gray-700">1. Input JSON</label>
+                <span id="inputStats" class="text-xs text-gray-400 font-mono">0 lines | 0 B</span>
+            </div>
+            <textarea id="jsonInput" rows="15" oninput="onInputChanged()" placeholder='Paste your JSON here...' class="w-full flex-grow p-3 font-mono text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Column 2: Options & Keys -->
+        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+            <label class="block font-semibold mb-2 text-sm text-gray-700">2. Filtering Mode</label>
+            
+            <!-- Toggle Mode -->
+            <div class="grid grid-cols-2 gap-1 bg-gray-100 p-1 rounded-lg mb-4 text-xs font-medium">
+                <button id="btnModeDelete" onclick="setMode('delete')" class="py-2 rounded-md transition bg-white text-blue-600 shadow-sm">Exclude (Delete)</button>
+                <button id="btnModeKeep" onclick="setMode('keep')" class="py-2 rounded-md transition text-gray-600 hover:text-gray-900">Include (Keep)</button>
+            </div>
+
+            <label id="keysLabel" for="keysInput" class="block font-semibold mb-1 text-sm text-gray-700">Keys or paths to exclude</label>
+            <p id="keysHelp" class="text-xs text-gray-500 mb-2">One path per line (e.g., <code class="bg-gray-100 px-1 rounded">id</code> or <code class="bg-gray-100 px-1 rounded">features.geometry</code>)</p>
+            
+            <textarea id="keysInput" rows="8" oninput="saveStorage()" placeholder="type&#10;metadata.date&#10;features.properties.address" class="w-full p-3 font-mono text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none mb-4"></textarea>
+            
+            <button onclick="cleanJson()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg transition shadow-sm">
+                Run Cleaner 🚀
+            </button>
+            <div id="errorMessage" class="mt-3 text-xs text-red-500 font-medium hidden"></div>
+        </div>
+
+        <!-- Column 3: Output JSON -->
+        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+            <div class="flex justify-between items-center mb-2">
+                <label for="jsonOutput" class="block font-semibold text-sm text-gray-700">3. Output JSON</label>
+                <div class="flex items-center gap-3">
+                    <span id="outputStats" class="text-xs text-gray-400 font-mono">0 lines | 0 B</span>
+                    <button onclick="copyOutput()" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 px-2.5 py-1 rounded transition font-medium">
+                        Copy
+                    </button>
+                </div>
+            </div>
+            <textarea id="jsonOutput" rows="15" readonly placeholder='Result will appear here...' class="w-full flex-grow p-3 font-mono text-xs bg-gray-50 border border-gray-300 rounded-lg focus:outline-none resize-none"></textarea>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 py-4 text-center text-xs text-gray-500">
+        A lightweight in-browser utility • 100% client-side processing (no data sent)
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        let currentMode = 'delete'; // 'delete' or 'keep'
+
+        // --- Stats calculation (lines and size) ---
+        function updateStats(text, elementId) {
+            const statsEl = document.getElementById(elementId);
+            if (!text) {
+                statsEl.textContent = "0 lines | 0 B";
+                return;
+            }
+            const lines = text.split('\n').length;
+            const bytes = new Blob([text]).size;
+            let sizeStr = "";
+            if (bytes < 1024) {
+                sizeStr = bytes + " B";
+            } else if (bytes < 1024 * 1024) {
+                sizeStr = (bytes / 1024).toFixed(1) + " KB";
+            } else {
+                sizeStr = (bytes / (1024 * 1024)).toFixed(1) + " MB";
+            }
+            statsEl.textContent = `${lines} line${lines > 1 ? 's' : ''} | ${sizeStr}`;
+        }
+
+        // --- LocalStorage Management ---
+        function saveStorage() {
+            localStorage.setItem('json_key_cleaner_input', document.getElementById('jsonInput').value);
+            localStorage.setItem('json_key_cleaner_keys', document.getElementById('keysInput').value);
+            localStorage.setItem('json_key_cleaner_mode', currentMode);
+        }
+
+        function onInputChanged() {
+            saveStorage();
+            updateStats(document.getElementById('jsonInput').value, 'inputStats');
+        }
+
+        function clearStorage() {
+            localStorage.removeItem('json_key_cleaner_input');
+            localStorage.removeItem('json_key_cleaner_keys');
+            localStorage.removeItem('json_key_cleaner_mode');
+            document.getElementById('jsonInput').value = '';
+            document.getElementById('keysInput').value = '';
+            document.getElementById('jsonOutput').value = '';
+            updateStats('', 'inputStats');
+            updateStats('', 'outputStats');
+            setMode('delete');
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedInput = localStorage.getItem('json_key_cleaner_input');
+            const savedKeys = localStorage.getItem('json_key_cleaner_keys');
+            const savedMode = localStorage.getItem('json_key_cleaner_mode');
+
+            if (savedInput !== null) {
+                document.getElementById('jsonInput').value = savedInput;
+                updateStats(savedInput, 'inputStats');
+            }
+            if (savedKeys !== null) {
+                document.getElementById('keysInput').value = savedKeys;
+            }
+            if (savedMode !== null) {
+                setMode(savedMode);
+            }
+
+            if (savedInput && savedKeys) {
+                cleanJson();
+            }
+        });
+
+        function setMode(mode) {
+            currentMode = mode;
+            const btnDelete = document.getElementById('btnModeDelete');
+            const btnKeep = document.getElementById('btnModeKeep');
+            const keysLabel = document.getElementById('keysLabel');
+            const keysHelp = document.getElementById('keysHelp');
+            const keysInput = document.getElementById('keysInput');
+
+            if (mode === 'delete') {
+                btnDelete.className = "py-2 rounded-md transition bg-white text-blue-600 shadow-sm";
+                btnKeep.className = "py-2 rounded-md transition text-gray-600 hover:text-gray-900";
+                keysLabel.textContent = "Keys or paths to exclude";
+                keysHelp.innerHTML = 'One path per line (e.g., <code class="bg-gray-100 px-1 rounded">id</code> or <code class="bg-gray-100 px-1 rounded">features.geometry</code>)';
+                keysInput.placeholder = "type\nmetadata.date\nfeatures.properties.address";
+            } else {
+                btnKeep.className = "py-2 rounded-md transition bg-white text-blue-600 shadow-sm";
+                btnDelete.className = "py-2 rounded-md transition text-gray-600 hover:text-gray-900";
+                keysLabel.textContent = "Keys or paths to include";
+                keysHelp.innerHTML = 'Only these paths will be kept (e.g., <code class="bg-gray-100 px-1 rounded">id</code> or <code class="bg-gray-100 px-1 rounded">features.geometry</code>)';
+                keysInput.placeholder = "type\nmetadata.date\nfeatures.properties.address";
+            }
+            saveStorage();
+            cleanJson();
+        }
+
+        // --- Deletion Logic (Exclude) ---
+        function deletePath(obj, pathString) {
+            const parts = pathString.split('.').map(p => p.trim()).filter(p => p.length > 0);
+            deleteHelper(obj, parts);
+        }
+
+        function deleteHelper(target, parts) {
+            if (!target || parts.length === 0) return;
+            const key = parts[0];
+            const rest = parts.slice(1);
+
+            if (Array.isArray(target)) {
+                target.forEach(item => deleteHelper(item, parts));
+            } else if (typeof target === 'object' && target !== null) {
+                if (rest.length === 0) {
+                    delete target[key];
+                } else {
+                    if (target[key] !== undefined) {
+                        deleteHelper(target[key], rest);
+                    }
+                }
+            }
+        }
+
+        // --- Inclusion Logic (Keep) ---
+        function isAllowedPrefixOf(prefix, target) {
+            if (prefix.length > target.length) return false;
+            for (let i = 0; i < prefix.length; i++) {
+                if (prefix[i] !== target[i]) return false;
+            }
+            return true;
+        }
+
+        function isEqualPath(arr1, arr2) {
+            if (arr1.length !== arr2.length) return false;
+            for (let i = 0; i < arr1.length; i++) {
+                if (arr1[i] !== arr2[i]) return false;
+            }
+            return true;
+        }
+
+        function isCovered(currentPath, allowedPaths) {
+            for (let allowed of allowedPaths) {
+                if (isEqualPath(currentPath, allowed) || isAllowedPrefixOf(allowed, currentPath)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function shouldVisit(currentPath, allowedPaths) {
+            if (currentPath.length === 0) return true;
+            for (let allowed of allowedPaths) {
+                if (isAllowedPrefixOf(currentPath, allowed)) return true;
+                if (isAllowedPrefixOf(allowed, currentPath)) return true;
+            }
+            return false;
+        }
+
+        function filterKeep(node, currentPath, allowedPaths) {
+            if (!shouldVisit(currentPath, allowedPaths)) {
+                return undefined;
+            }
+
+            if (isCovered(currentPath, allowedPaths)) {
+                return node !== null && typeof node === 'object' ? JSON.parse(JSON.stringify(node)) : node;
+            }
+
+            if (node === null || typeof node !== 'object') {
+                return undefined;
+            }
+
+            if (Array.isArray(node)) {
+                const filteredArray = node
+                    .map(item => filterKeep(item, currentPath, allowedPaths))
+                    .filter(item => item !== undefined);
+                return filteredArray.length > 0 ? filteredArray : undefined;
+            }
+
+            let res = {};
+            let hasKeys = false;
+
+            for (const key of Object.keys(node)) {
+                const nextPath = [...currentPath, key];
+                const subResult = filterKeep(node[key], nextPath, allowedPaths);
+                if (subResult !== undefined) {
+                    res[key] = subResult;
+                    hasKeys = true;
+                }
+            }
+
+            return hasKeys ? res : undefined;
+        }
+
+        // --- Main Execution ---
+        function cleanJson() {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.classList.add('hidden');
+            errorDiv.textContent = '';
+
+            const inputVal = document.getElementById('jsonInput').value.trim();
+            const keysVal = document.getElementById('keysInput').value.trim();
+
+            saveStorage();
+
+            if (!inputVal) {
+                showError("Please enter a valid JSON.");
+                return;
+            }
+
+            let data;
+            try {
+                data = JSON.parse(inputVal);
+            } catch (e) {
+                showError("JSON Syntax Error: " + e.message);
+                return;
+            }
+
+            const paths = keysVal.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+            let finalOutputStr = "";
+
+            if (currentMode === 'delete') {
+                paths.forEach(path => {
+                    deletePath(data, path);
+                });
+                finalOutputStr = JSON.stringify(data, null, 2);
+            } else {
+                const allowedPaths = paths.map(p => p.split('.').map(part => part.trim()).filter(part => part.length > 0));
+                let result = filterKeep(data, [], allowedPaths);
+                finalOutputStr = JSON.stringify(result || {}, null, 2);
+            }
+
+            document.getElementById('jsonOutput').value = finalOutputStr;
+            updateStats(document.getElementById('jsonInput').value, 'inputStats');
+            updateStats(finalOutputStr, 'outputStats');
+        }
+
+        function showError(msg) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = msg;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function loadExample() {
+            const sample = {
+                "type": "FeatureCollection",
+                "metadata": {
+                    "author": "John Doe",
+                    "version": "1.0"
+                },
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": 101,
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [2.35, 48.85]
+                        },
+                        "properties": {
+                            "name": "Location A",
+                            "address": {
+                                "street": "10 rue de Paris",
+                                "city": "Paris"
+                            }
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "id": 102,
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [4.83, 45.76]
+                        },
+                        "properties": {
+                            "name": "Location B",
+                            "address": {
+                                "street": "15 place Bellecour",
+                                "city": "Lyon"
+                            }
+                        }
+                    }
+                ]
+            };
+
+            const sampleStr = JSON.stringify(sample, null, 2);
+            document.getElementById('jsonInput').value = sampleStr;
+            setMode('delete');
+            document.getElementById('keysInput').value = document.getElementById('keysInput').placeholder;
+            cleanJson();
+        }
+
+        function copyOutput() {
+            const output = document.getElementById('jsonOutput');
+            if (!output.value) return;
+            output.select();
+            navigator.clipboard.writeText(output.value);
+            alert("JSON copied to clipboard!");
+        }
+    </script>
+</body>
+</html>
